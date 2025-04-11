@@ -1,15 +1,17 @@
 use bevy::prelude::*;
 
 fn main() {
-    let mut app = App::new();
+    let mut application = App::new();
 
-    app.add_plugins(game::GamePlugin)
+    application
+        .add_plugins(game::GamePlugin)
         .add_plugins(physics::PhysicsPlugin)
         .add_plugins(bird::BirdPlugin)
         .add_plugins(input::InputPlugin)
+        .add_plugins(obstacles::ObstaclePlugin)
         .add_systems(Update, escape_to_quit);
 
-    app.run();
+    application.run();
 }
 
 fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<AppExit>) {
@@ -24,8 +26,9 @@ mod input {
     pub struct InputPlugin;
 
     impl Plugin for InputPlugin {
-        fn build(&self, app: &mut App) {
-            app.add_event::<ButtonPressed>()
+        fn build(&self, application: &mut App) {
+            application
+                .add_event::<ButtonPressed>()
                 .add_systems(Update, listen_for_input);
         }
     }
@@ -53,18 +56,24 @@ mod game {
     pub struct GamePlugin;
 
     impl Plugin for GamePlugin {
-        fn build(&self, app: &mut App) {
-            app.add_plugins(DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: "Blappy birb".into(),
-                    name: Some("blappy_birb.app".into()),
-                    window_theme: Some(WindowTheme::Dark),
+        fn build(&self, application: &mut App) {
+            application
+                .add_plugins(DefaultPlugins.set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Blappy birb".into(),
+                        name: Some("blappy_birb.app".into()),
+                        window_theme: Some(WindowTheme::Dark),
+                        ..default()
+                    }),
                     ..default()
-                }),
-                ..default()
-            }))
-            .add_systems(Startup, setup_camera)
-            .add_systems(Startup, spawn_ground_and_ceiling);
+                }))
+                .init_resource::<Score>()
+                .add_systems(Startup, setup_camera)
+                .add_systems(Startup, spawn_ground_and_ceiling)
+                .add_systems(Startup, spawn_ui)
+                .add_systems(Update, detect_collisions)
+                .add_systems(Update, update_score)
+                .add_systems(Update, player_scored);
         }
     }
 
@@ -91,6 +100,55 @@ mod game {
             RigidBody::Fixed,
         ));
     }
+
+    #[derive(Default, Resource)]
+    pub struct Score {
+        score: usize,
+    }
+
+    impl Score {
+        pub fn passed_obstactle(&mut self) {
+            self.score += 100;
+        }
+    }
+
+    #[derive(Default, Component)]
+    struct ScoreMarker;
+
+    fn spawn_ui(mut commands: Commands) {
+        commands.spawn((
+            ScoreMarker,
+            Text::new("0"),
+            TextLayout::new_with_justify(JustifyText::Right),
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: Val::Px(15.0),
+                right: Val::Px(15.0),
+                ..default()
+            },
+        ));
+    }
+
+    fn update_score(score: Res<Score>, mut score_display: Query<&mut Text, With<ScoreMarker>>) {
+        let mut score_display = score_display.single_mut();
+
+        score_display.0 = format!("{}", score.score);
+    }
+
+    fn player_scored(
+        mut passed_obstacle: EventReader<crate::obstacles::PlayerPassedObstacle>,
+        mut score: ResMut<Score>,
+    ) {
+        for _ in passed_obstacle.read() {
+            score.passed_obstactle();
+        }
+    }
+
+    fn detect_collisions(mut collision_events: EventReader<CollisionEvent>) {
+        for collision in collision_events.read() {
+            println!("Collided: {collision:#?}");
+        }
+    }
 }
 
 mod physics {
@@ -100,8 +158,9 @@ mod physics {
     pub struct PhysicsPlugin;
 
     impl Plugin for PhysicsPlugin {
-        fn build(&self, app: &mut App) {
-            app.add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+        fn build(&self, application: &mut App) {
+            application
+                .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
                 .add_plugins(RapierDebugRenderPlugin::default());
         }
     }
@@ -114,8 +173,9 @@ mod bird {
     pub struct BirdPlugin;
 
     impl Plugin for BirdPlugin {
-        fn build(&self, app: &mut App) {
-            app.add_systems(Startup, spawn_bird)
+        fn build(&self, application: &mut App) {
+            application
+                .add_systems(Startup, spawn_bird)
                 .add_systems(Update, flap_bird);
         }
     }
@@ -139,7 +199,8 @@ mod bird {
             Sprite::from_image(asset_server.load("sprites/bevy_bird_dark.png")),
             RigidBody::Dynamic,
             Collider::ball(50.0),
-            Transform::from_xyz(spawn_x, spawn_y, 0.0).with_scale(Vec3::new(0.5, 0.5, 0.0)),
+            ActiveEvents::all(),
+            Transform::from_xyz(spawn_x, spawn_y, 0.0).with_scale(Vec3::new(0.25, 0.25, 0.0)),
             GravityScale(1.4),
             Velocity::default(),
             LockedAxes::ROTATION_LOCKED,
@@ -156,5 +217,95 @@ mod bird {
             let mut bird_velocity = bird.single_mut();
             bird_velocity.linvel.y = 800.0;
         }
+    }
+}
+
+mod obstacles {
+    use bevy::{prelude::*, window::PrimaryWindow};
+    use bevy_rapier2d::prelude::*;
+
+    pub const TIME_BETWEEN_SPAWN: f32 = 2.0;
+
+    pub const OBSTACLE_WIDTH: f32 = 20.0;
+
+    pub struct ObstaclePlugin;
+
+    impl Plugin for ObstaclePlugin {
+        fn build(&self, application: &mut App) {
+            application
+                .add_event::<PlayerPassedObstacle>()
+                .insert_resource(ObstacleSpawnTimer {
+                    timer: Timer::from_seconds(TIME_BETWEEN_SPAWN, TimerMode::Repeating),
+                })
+                .add_systems(Startup, spawn_obstacle)
+                .add_systems(Update, track_obstacle_movement)
+                .add_systems(Update, spawn_obstacle_timed);
+        }
+    }
+
+    #[derive(Resource)]
+    struct ObstacleSpawnTimer {
+        timer: Timer,
+    }
+
+    #[derive(Default, Component)]
+    struct ObstacleMarker;
+
+    #[derive(Default, Event)]
+    pub struct PlayerPassedObstacle;
+
+    fn track_obstacle_movement(
+        mut commands: Commands,
+        obstacles: Query<(Entity, &Transform), With<ObstacleMarker>>,
+        window: Query<&Window, With<PrimaryWindow>>,
+        mut passed_obstacle: EventWriter<PlayerPassedObstacle>,
+    ) {
+        let window = window.single();
+        let left_boundary = -(window.size().x / 2.0) - OBSTACLE_WIDTH;
+
+        for (obstacle, transform) in obstacles.iter() {
+            if transform.translation.x < left_boundary {
+                println!("Should despawn {obstacle}");
+                commands.entity(obstacle).despawn_recursive();
+                passed_obstacle.send_default();
+            }
+        }
+    }
+
+    fn spawn_obstacle_timed(
+        commands: Commands,
+        time: Res<Time>,
+        mut obstacle_spawner: ResMut<ObstacleSpawnTimer>,
+    ) {
+        if obstacle_spawner.timer.tick(time.delta()).just_finished() {
+            spawn_obstacle(commands);
+        }
+    }
+
+    fn spawn_obstacle(mut commands: Commands) {
+        println!("Time to spawn");
+
+        commands
+            .spawn((
+                ObstacleMarker,
+                Transform::from_xyz(100.0, 100.0, 0.0),
+                RigidBody::KinematicVelocityBased,
+                Velocity {
+                    linvel: Vec2::new(-200.0, 0.0),
+                    ..default()
+                },
+            ))
+            .with_children(|parent| {
+                parent.spawn((
+                    Collider::cuboid(OBSTACLE_WIDTH, 100.0),
+                    Transform::from_xyz(0.0, 100.0, 0.0),
+                    Sensor,
+                ));
+                parent.spawn((
+                    Collider::cuboid(OBSTACLE_WIDTH, 100.0),
+                    Transform::from_xyz(0.0, -300.0, 0.0),
+                    Sensor,
+                ));
+            });
     }
 }
