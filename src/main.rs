@@ -116,8 +116,7 @@ mod bird {
     impl Plugin for BirdPlugin {
         fn build(&self, app: &mut App) {
             app.add_systems(Startup, spawn_bird)
-                .add_systems(Update, flap_bird)
-                .add_systems(Update, bird_falls);
+                .add_systems(Update, flap_bird);
         }
     }
 
@@ -157,11 +156,5 @@ mod bird {
             let mut bird_velocity = bird.single_mut();
             bird_velocity.linvel.y = 800.0;
         }
-    }
-
-    fn bird_falls(time: Res<Time>, mut bird_query: Query<&mut Transform, With<BirdMarker>>) {
-        let mut bird_transform = bird_query.single_mut();
-
-        bird_transform.translation.y -= 150. * time.delta_secs();
     }
 }
