@@ -1,5 +1,7 @@
 use bevy::prelude::*;
 
+const BIRB_X: f32 = 80.0;
+
 fn main() {
     let mut application = App::new();
 
@@ -63,6 +65,8 @@ mod game {
                         title: "Blappy birb".into(),
                         name: Some("blappy_birb.app".into()),
                         window_theme: Some(WindowTheme::Dark),
+                        // This breaks on WSL for some reason
+                        // resolution: WindowResolution::new(640.0, 1136.0),
                         ..default()
                     }),
                     ..default()
@@ -167,8 +171,10 @@ mod physics {
 }
 
 mod bird {
-    use bevy::{prelude::*, window::PrimaryWindow};
+    use bevy::prelude::*;
     use bevy_rapier2d::prelude::*;
+
+    use crate::BIRB_X;
 
     pub struct BirdPlugin;
 
@@ -183,15 +189,7 @@ mod bird {
     #[derive(Component)]
     struct BirdMarker;
 
-    fn spawn_bird(
-        mut commands: Commands,
-        asset_server: Res<AssetServer>,
-        window: Query<&Window, With<PrimaryWindow>>,
-    ) {
-        let window = window.single();
-        let width = window.resolution.width();
-
-        let spawn_x = 20.0 - (width / 2.0) + 128.0;
+    fn spawn_bird(mut commands: Commands, asset_server: Res<AssetServer>) {
         let spawn_y = 128.0;
 
         commands.spawn((
@@ -200,7 +198,7 @@ mod bird {
             RigidBody::Dynamic,
             Collider::ball(50.0),
             ActiveEvents::all(),
-            Transform::from_xyz(spawn_x, spawn_y, 0.0).with_scale(Vec3::new(0.25, 0.25, 0.0)),
+            Transform::from_xyz(BIRB_X, spawn_y, 0.0).with_scale(Vec3::new(0.25, 0.25, 0.0)),
             GravityScale(1.4),
             Velocity::default(),
             LockedAxes::ROTATION_LOCKED,
@@ -211,11 +209,13 @@ mod bird {
         mut bird: Query<&mut Velocity, With<BirdMarker>>,
         mut input_pressed: EventReader<crate::input::ButtonPressed>,
     ) {
-        for _ in input_pressed.read() {
-            println!("Input pressed");
+        const JUMP_VELOCITY: f32 = 600.0;
 
+        for _ in input_pressed.read() {
             let mut bird_velocity = bird.single_mut();
-            bird_velocity.linvel.y = 800.0;
+            if bird_velocity.linvel.y <= JUMP_VELOCITY / 2.0 {
+                bird_velocity.linvel.y = JUMP_VELOCITY;
+            }
         }
     }
 }
@@ -223,6 +223,8 @@ mod bird {
 mod obstacles {
     use bevy::{prelude::*, window::PrimaryWindow};
     use bevy_rapier2d::prelude::*;
+
+    use crate::BIRB_X;
 
     pub const TIME_BETWEEN_SPAWN: f32 = 2.0;
 
@@ -238,7 +240,7 @@ mod obstacles {
                     timer: Timer::from_seconds(TIME_BETWEEN_SPAWN, TimerMode::Repeating),
                 })
                 .add_systems(Startup, spawn_obstacle)
-                .add_systems(Update, track_obstacle_movement)
+                .add_systems(Update, (track_obstacle_movement, score_obstacle))
                 .add_systems(Update, spawn_obstacle_timed);
         }
     }
@@ -251,6 +253,9 @@ mod obstacles {
     #[derive(Default, Component)]
     struct ObstacleMarker;
 
+    #[derive(Default, Component)]
+    struct AlreadyScoredMarker;
+
     #[derive(Default, Event)]
     pub struct PlayerPassedObstacle;
 
@@ -258,7 +263,6 @@ mod obstacles {
         mut commands: Commands,
         obstacles: Query<(Entity, &Transform), With<ObstacleMarker>>,
         window: Query<&Window, With<PrimaryWindow>>,
-        mut passed_obstacle: EventWriter<PlayerPassedObstacle>,
     ) {
         let window = window.single();
         let left_boundary = -(window.size().x / 2.0) - OBSTACLE_WIDTH;
@@ -267,6 +271,20 @@ mod obstacles {
             if transform.translation.x < left_boundary {
                 println!("Should despawn {obstacle}");
                 commands.entity(obstacle).despawn_recursive();
+            }
+        }
+    }
+
+    type ObstacleNotScored = (With<ObstacleMarker>, Without<AlreadyScoredMarker>);
+
+    fn score_obstacle(
+        mut commands: Commands,
+        obstacles: Query<(Entity, &Transform), ObstacleNotScored>,
+        mut passed_obstacle: EventWriter<PlayerPassedObstacle>,
+    ) {
+        for (obstacle, transform) in obstacles.iter() {
+            if transform.translation.x < BIRB_X {
+                commands.entity(obstacle).insert(AlreadyScoredMarker);
                 passed_obstacle.send_default();
             }
         }
@@ -276,19 +294,22 @@ mod obstacles {
         commands: Commands,
         time: Res<Time>,
         mut obstacle_spawner: ResMut<ObstacleSpawnTimer>,
+        window: Query<&Window, With<PrimaryWindow>>,
     ) {
         if obstacle_spawner.timer.tick(time.delta()).just_finished() {
-            spawn_obstacle(commands);
+            spawn_obstacle(commands, window);
         }
     }
 
-    fn spawn_obstacle(mut commands: Commands) {
+    fn spawn_obstacle(mut commands: Commands, window: Query<&Window, With<PrimaryWindow>>) {
         println!("Time to spawn");
+        let window = window.single();
+        let left_boundary = (window.size().x / 2.0) - OBSTACLE_WIDTH;
 
         commands
             .spawn((
                 ObstacleMarker,
-                Transform::from_xyz(100.0, 100.0, 0.0),
+                Transform::from_xyz(left_boundary, 100.0, 0.0),
                 RigidBody::KinematicVelocityBased,
                 Velocity {
                     linvel: Vec2::new(-200.0, 0.0),
@@ -297,13 +318,13 @@ mod obstacles {
             ))
             .with_children(|parent| {
                 parent.spawn((
-                    Collider::cuboid(OBSTACLE_WIDTH, 100.0),
-                    Transform::from_xyz(0.0, 100.0, 0.0),
+                    Collider::cuboid(OBSTACLE_WIDTH, 400.0),
+                    Transform::from_xyz(0.0, 300.0, 0.0),
                     Sensor,
                 ));
                 parent.spawn((
-                    Collider::cuboid(OBSTACLE_WIDTH, 100.0),
-                    Transform::from_xyz(0.0, -300.0, 0.0),
+                    Collider::cuboid(OBSTACLE_WIDTH, 400.0),
+                    Transform::from_xyz(0.0, -700.0, 0.0),
                     Sensor,
                 ));
             });
