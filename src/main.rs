@@ -1,9 +1,13 @@
 use bevy::prelude::*;
+use bevy_rand::prelude::*;
+use consts::*;
 
 fn main() {
     let mut application = App::new();
+    let seed = 42i64.to_be_bytes();
 
     application
+        .add_plugins(EntropyPlugin::<WyRand>::with_seed(seed))
         .add_plugins(game::GamePlugin)
         .add_plugins(physics::PhysicsPlugin)
         .add_plugins(bird::BirdPlugin)
@@ -28,8 +32,6 @@ pub enum GameState {
     Menu,
     InGame,
 }
-
-use consts::*;
 
 mod consts {
     pub const BIRB_X: f32 = 80.0;
@@ -57,8 +59,13 @@ mod input {
     fn listen_for_input(
         mut event_pressed: EventWriter<ButtonPressed>,
         keyboard: Res<ButtonInput<KeyCode>>,
+        mouse: Res<ButtonInput<MouseButton>>,
+        touches: Res<Touches>,
     ) {
-        if keyboard.just_pressed(KeyCode::Space) {
+        if keyboard.just_pressed(KeyCode::Space)
+            || mouse.just_pressed(MouseButton::Left)
+            || touches.iter_just_pressed().next().is_some()
+        {
             event_pressed.send_default();
         }
     }
@@ -271,6 +278,7 @@ mod obstacles {
     use crate::*;
     use bevy::window::PrimaryWindow;
     use bevy_rapier2d::prelude::*;
+    use rand::Rng;
 
     pub struct ObstaclePlugin;
 
@@ -313,8 +321,11 @@ mod obstacles {
         obstacles: Query<(Entity, &Transform), With<ObstacleMarker>>,
         window: Query<&Window, With<PrimaryWindow>>,
     ) {
-        let window = window.single();
-        let left_boundary = -(window.size().x / 2.0) - OBSTACLE_WIDTH;
+        let Ok(window) = window.get_single() else {
+            return;
+        };
+
+        let left_boundary = -(window.resolution.width() / 2.0) - OBSTACLE_WIDTH;
 
         for (obstacle, transform) in obstacles.iter() {
             if transform.translation.x < left_boundary {
@@ -344,21 +355,27 @@ mod obstacles {
         time: Res<Time>,
         mut obstacle_spawner: ResMut<ObstacleSpawnTimer>,
         window: Query<&Window, With<PrimaryWindow>>,
+        rng: GlobalEntropy<WyRand>,
     ) {
         if obstacle_spawner.timer.tick(time.delta()).just_finished() {
-            spawn_obstacle(commands, window);
+            spawn_obstacle(commands, window, rng);
         }
     }
 
-    fn spawn_obstacle(mut commands: Commands, window: Query<&Window, With<PrimaryWindow>>) {
+    fn spawn_obstacle(
+        mut commands: Commands,
+        window: Query<&Window, With<PrimaryWindow>>,
+        mut rng: GlobalEntropy<WyRand>,
+    ) {
         println!("Time to spawn");
         let window = window.single();
         let left_boundary = (window.size().x / 2.0) - OBSTACLE_WIDTH;
+        let height = rng.gen_range(100.0..400.0);
 
         commands
             .spawn((
                 ObstacleMarker,
-                Transform::from_xyz(left_boundary, 100.0, 0.0),
+                Transform::from_xyz(left_boundary, height, 0.0),
                 RigidBody::KinematicVelocityBased,
                 Velocity {
                     linvel: Vec2::new(-200.0, 0.0),
