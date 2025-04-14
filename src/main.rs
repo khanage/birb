@@ -1,7 +1,5 @@
 use bevy::prelude::*;
 
-const BIRB_X: f32 = 80.0;
-
 fn main() {
     let mut application = App::new();
 
@@ -11,6 +9,8 @@ fn main() {
         .add_plugins(bird::BirdPlugin)
         .add_plugins(input::InputPlugin)
         .add_plugins(obstacles::ObstaclePlugin)
+        .init_state::<GameState>()
+        .enable_state_scoped_entities::<GameState>()
         .add_systems(Update, escape_to_quit);
 
     application.run();
@@ -20,6 +20,22 @@ fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<App
     if keys.just_pressed(KeyCode::Escape) {
         app_exit.send_default();
     }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
+pub enum GameState {
+    #[default]
+    Menu,
+    InGame,
+}
+
+use consts::*;
+
+mod consts {
+    pub const BIRB_X: f32 = 80.0;
+    pub const JUMP_VELOCITY: f32 = 600.0;
+    pub const TIME_BETWEEN_SPAWN: f32 = 2.0;
+    pub const OBSTACLE_WIDTH: f32 = 20.0;
 }
 
 mod input {
@@ -49,10 +65,8 @@ mod input {
 }
 
 mod game {
-    use bevy::{
-        prelude::*,
-        window::{PrimaryWindow, WindowTheme},
-    };
+    use crate::*;
+    use bevy::window::{PrimaryWindow, WindowTheme};
     use bevy_rapier2d::prelude::*;
 
     pub struct GamePlugin;
@@ -73,16 +87,39 @@ mod game {
                 }))
                 .init_resource::<Score>()
                 .add_systems(Startup, setup_camera)
-                .add_systems(Startup, spawn_ground_and_ceiling)
-                .add_systems(Startup, spawn_ui)
-                .add_systems(Update, detect_collisions)
-                .add_systems(Update, update_score)
-                .add_systems(Update, player_scored);
+                .add_systems(OnEnter(GameState::Menu), spawn_start_menu)
+                .add_systems(
+                    Update,
+                    start_game_on_input.run_if(in_state(GameState::Menu)),
+                )
+                .add_systems(OnEnter(GameState::InGame), spawn_ground_and_ceiling)
+                .add_systems(OnEnter(GameState::InGame), spawn_ui)
+                .add_systems(
+                    Update,
+                    (detect_collisions, update_score, player_scored)
+                        .run_if(in_state(GameState::InGame)),
+                );
         }
     }
 
     fn setup_camera(mut commands: Commands) {
         commands.spawn(Camera2d);
+    }
+
+    fn spawn_start_menu(mut commands: Commands) {
+        commands.spawn((
+            Text::new("Press the button doofus"),
+            StateScoped(GameState::Menu),
+        ));
+    }
+
+    fn start_game_on_input(
+        mut input: EventReader<input::ButtonPressed>,
+        mut next_state: ResMut<NextState<GameState>>,
+    ) {
+        for _ in input.read() {
+            next_state.set(GameState::InGame);
+        }
     }
 
     fn spawn_ground_and_ceiling(
@@ -96,12 +133,14 @@ mod game {
             Collider::cuboid(width, 10.0),
             Transform::from_xyz(-width / 2.0, height / 2.0, 0.0),
             RigidBody::Fixed,
+            StateScoped(GameState::InGame),
         ));
 
         commands.spawn((
             Collider::cuboid(width, 10.0),
             Transform::from_xyz(-width / 2.0, -height / 2.0, 0.0),
             RigidBody::Fixed,
+            StateScoped(GameState::InGame),
         ));
     }
 
@@ -130,11 +169,14 @@ mod game {
                 right: Val::Px(15.0),
                 ..default()
             },
+            StateScoped(GameState::InGame),
         ));
     }
 
     fn update_score(score: Res<Score>, mut score_display: Query<&mut Text, With<ScoreMarker>>) {
-        let mut score_display = score_display.single_mut();
+        let Ok(mut score_display) = score_display.get_single_mut() else {
+            return;
+        };
 
         score_display.0 = format!("{}", score.score);
     }
@@ -148,15 +190,23 @@ mod game {
         }
     }
 
-    fn detect_collisions(mut collision_events: EventReader<CollisionEvent>) {
+    fn detect_collisions(
+        mut collision_events: EventReader<CollisionEvent>,
+        mut next_state: ResMut<NextState<GameState>>,
+    ) {
         for collision in collision_events.read() {
+            let CollisionEvent::Started(_, _, _) = collision else {
+                continue;
+            };
+
             println!("Collided: {collision:#?}");
+            next_state.set(GameState::Menu);
         }
     }
 }
 
 mod physics {
-    use bevy::prelude::*;
+    use crate::*;
     use bevy_rapier2d::prelude::*;
 
     pub struct PhysicsPlugin;
@@ -171,18 +221,16 @@ mod physics {
 }
 
 mod bird {
-    use bevy::prelude::*;
+    use crate::*;
     use bevy_rapier2d::prelude::*;
-
-    use crate::BIRB_X;
 
     pub struct BirdPlugin;
 
     impl Plugin for BirdPlugin {
         fn build(&self, application: &mut App) {
             application
-                .add_systems(Startup, spawn_bird)
-                .add_systems(Update, flap_bird);
+                .add_systems(OnEnter(GameState::InGame), spawn_bird)
+                .add_systems(Update, flap_bird.run_if(in_state(GameState::InGame)));
         }
     }
 
@@ -202,6 +250,7 @@ mod bird {
             GravityScale(1.4),
             Velocity::default(),
             LockedAxes::ROTATION_LOCKED,
+            StateScoped(GameState::InGame),
         ));
     }
 
@@ -209,8 +258,6 @@ mod bird {
         mut bird: Query<&mut Velocity, With<BirdMarker>>,
         mut input_pressed: EventReader<crate::input::ButtonPressed>,
     ) {
-        const JUMP_VELOCITY: f32 = 600.0;
-
         for _ in input_pressed.read() {
             let mut bird_velocity = bird.single_mut();
             if bird_velocity.linvel.y <= JUMP_VELOCITY / 2.0 {
@@ -221,14 +268,9 @@ mod bird {
 }
 
 mod obstacles {
-    use bevy::{prelude::*, window::PrimaryWindow};
+    use crate::*;
+    use bevy::window::PrimaryWindow;
     use bevy_rapier2d::prelude::*;
-
-    use crate::BIRB_X;
-
-    pub const TIME_BETWEEN_SPAWN: f32 = 2.0;
-
-    pub const OBSTACLE_WIDTH: f32 = 20.0;
 
     pub struct ObstaclePlugin;
 
@@ -239,9 +281,16 @@ mod obstacles {
                 .insert_resource(ObstacleSpawnTimer {
                     timer: Timer::from_seconds(TIME_BETWEEN_SPAWN, TimerMode::Repeating),
                 })
-                .add_systems(Startup, spawn_obstacle)
-                .add_systems(Update, (track_obstacle_movement, score_obstacle))
-                .add_systems(Update, spawn_obstacle_timed);
+                .add_systems(OnEnter(GameState::InGame), spawn_obstacle)
+                .add_systems(
+                    Update,
+                    (
+                        track_obstacle_movement,
+                        score_obstacle,
+                        spawn_obstacle_timed,
+                    )
+                        .run_if(in_state(GameState::InGame)),
+                );
         }
     }
 
@@ -315,6 +364,7 @@ mod obstacles {
                     linvel: Vec2::new(-200.0, 0.0),
                     ..default()
                 },
+                StateScoped(GameState::InGame),
             ))
             .with_children(|parent| {
                 parent.spawn((
