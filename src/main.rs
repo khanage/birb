@@ -289,7 +289,7 @@ mod obstacles {
                 .insert_resource(ObstacleSpawnTimer {
                     timer: Timer::from_seconds(TIME_BETWEEN_SPAWN, TimerMode::Repeating),
                 })
-                .add_systems(OnEnter(GameState::InGame), spawn_obstacle)
+                .add_systems(OnEnter(GameState::InGame), (spawn_obstacle, reset_timer))
                 .add_systems(
                     Update,
                     (
@@ -305,6 +305,10 @@ mod obstacles {
     #[derive(Resource)]
     struct ObstacleSpawnTimer {
         timer: Timer,
+    }
+
+    fn reset_timer(mut timer: ResMut<ObstacleSpawnTimer>) {
+        timer.timer.reset();
     }
 
     #[derive(Default, Component)]
