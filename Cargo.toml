@@ -1,5 +1,5 @@
 [package]
-name = "bird"
+name = "birb"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,7 +10,7 @@ opt-level = 1
 opt-level = 3
 
 [dependencies]
-bevy = { version = "0.15.3", features = ["wayland"] }
+bevy = { version = "0.15.3" }
 bevy_rand = { version = "0.9.0", default-features = false, features = [
   "wyrand",
 ] }
@@ -20,4 +20,3 @@ bevy_rapier2d = { version = "0.29.0", features = [
 ] }
 rand_core = "0.6.4"
 rand = "0.8.5"
-xkbcommon = { version = "0.8.0", features = ["wayland"] }
