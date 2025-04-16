@@ -73,7 +73,10 @@ jobs:
       - name: Publish
         run: |
           pushd khanage.github.io/games
+          find .
           git add .
+          git diff
+          git diff --exit-code
 
           if [[ $(git diff --exit-code) ]]; then
             COMMIT_MSG="${1:-Pushing changes}"
