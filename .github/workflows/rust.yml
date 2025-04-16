@@ -1,0 +1,78 @@
+name: Deploy
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/git
+            ~/.cargo/registry
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install dependencies
+        run: |
+          if [[ ! $(which wasm-pack) ]]; then 
+            curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          fi
+
+          if [[ ! $(which wasm-bindgen) ]]; then
+            cargo install wasm-bindgen-cli
+          fi
+
+          rustup target add wasm32-unknown-unknown
+
+      - name: Checkout pages repository
+        uses: actions/checkout@v4
+        with:
+          repository: "khanage/khanage.github.io"
+          ref: "main"
+          token: ${{ secrets.PAGES_DEPLOYMENT_TOKEN }}
+          path: khanage.github.io
+
+      - name: Setup git config
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "<>"
+
+      - name: Build
+        run: cargo build --release --target wasm32-unknown-unknown
+
+      - name: Optimise wasm
+        run: |
+          wasm-bindgen --no-typescript --target web \
+            --out-dir khanage.github.io/games/ \
+            --out-name "birb" \
+            ./target/wasm32-unknown-unknown/release/birb.wasm
+
+          cp index.html khanage.github.io/games/birb.html
+
+      - name: Publish
+        run: |
+          pushd khanage.github.io/games
+
+          if [[ $(git diff --exit-code) ]]; then
+            COMMIT_MSG="${1:-Pushing changes}"
+
+
+            git commit -am "$COMMIT_MSG"
+            git push
+
+          fi
+          popd
