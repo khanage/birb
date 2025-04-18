@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_asset_loader::prelude::*;
 use bevy_rand::prelude::*;
 use consts::*;
 
@@ -14,10 +15,21 @@ fn main() {
         .add_plugins(input::InputPlugin)
         .add_plugins(obstacles::ObstaclePlugin)
         .init_state::<GameState>()
+        .add_loading_state(
+            LoadingState::new(GameState::Loading)
+                .continue_to_state(GameState::Menu)
+                .load_collection::<AssetsToLoad>(),
+        )
         .enable_state_scoped_entities::<GameState>()
         .add_systems(Update, escape_to_quit);
 
     application.run();
+}
+
+#[derive(AssetCollection, Resource)]
+struct AssetsToLoad {
+    #[asset(path = "sprites/bevy_bird_dark.png")]
+    birb_sprite: Handle<Image>,
 }
 
 fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<AppExit>) {
@@ -29,6 +41,7 @@ fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<App
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
 pub enum GameState {
     #[default]
+    Loading,
     Menu,
     InGame,
 }
@@ -41,7 +54,7 @@ mod consts {
 }
 
 mod input {
-    use bevy::prelude::*;
+    use crate::*;
 
     pub struct InputPlugin;
 
@@ -99,8 +112,10 @@ mod game {
                     Update,
                     start_game_on_input.run_if(in_state(GameState::Menu)),
                 )
-                .add_systems(OnEnter(GameState::InGame), spawn_ground_and_ceiling)
-                .add_systems(OnEnter(GameState::InGame), spawn_ui)
+                .add_systems(
+                    OnEnter(GameState::InGame),
+                    (spawn_ground_and_ceiling, spawn_ui),
+                )
                 .add_systems(
                     Update,
                     (detect_collisions, update_score, player_scored)
@@ -244,12 +259,12 @@ mod bird {
     #[derive(Component)]
     struct BirdMarker;
 
-    fn spawn_bird(mut commands: Commands, asset_server: Res<AssetServer>) {
+    fn spawn_bird(mut commands: Commands, assets: Res<AssetsToLoad>) {
         let spawn_y = 128.0;
 
         commands.spawn((
             BirdMarker,
-            Sprite::from_image(asset_server.load("sprites/bevy_bird_dark.png")),
+            Sprite::from_image(assets.birb_sprite.clone()),
             RigidBody::Dynamic,
             Collider::ball(50.0),
             ActiveEvents::all(),
