@@ -435,7 +435,9 @@ mod bird {
                 .add_systems(OnEnter(AppState::InGame), spawn_bird)
                 .add_systems(
                     Update,
-                    (flap_bird, animate_bird).run_if(in_state(AppState::InGame)),
+                    (flap_bird, animate_bird)
+                        .run_if(in_state(AppState::InGame))
+                        .run_if(in_state(GameState::Running)),
                 );
         }
     }
