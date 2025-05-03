@@ -50,6 +50,10 @@ struct SpriteAssets {
 struct AudioAssets {
     #[asset(path = "audio/hit.ogg")]
     hit: Handle<AudioSource>,
+    #[asset(path = "audio/point.ogg")]
+    point: Handle<AudioSource>,
+    #[asset(path = "audio/die.ogg")]
+    die: Handle<AudioSource>,
 }
 
 fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<AppExit>) {
@@ -71,6 +75,8 @@ mod consts {
     pub const JUMP_VELOCITY: f32 = 600.0;
     pub const TIME_BETWEEN_SPAWN: f32 = 2.0;
     pub const OBSTACLE_WIDTH: f32 = 20.0;
+    pub const WINDOW_WIDTH: f32 = 640.0;
+    pub const WINDOW_HEIGHT: f32 = 1136.0;
 }
 
 mod input {
@@ -96,8 +102,8 @@ mod input {
         touches: Res<Touches>,
     ) {
         if keyboard.just_pressed(KeyCode::Space)
-            || mouse.just_pressed(MouseButton::Left)
             || touches.iter_just_pressed().next().is_some()
+            || mouse.just_pressed(MouseButton::Left)
         {
             event_pressed.send_default();
         }
@@ -124,7 +130,7 @@ mod game {
                         window_theme: Some(WindowTheme::Dark),
                         // This breaks on WSL for some reason
                         // #[cfg(not(target_os = "linux"))]
-                        resolution: bevy::window::WindowResolution::new(640.0, 1136.0),
+                        resolution: bevy::window::WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
                         ..default()
                     }),
                     ..default()
@@ -187,8 +193,8 @@ mod game {
         let background = Sprite {
             image: sprites.start_screen_background.clone(),
             custom_size: Some(Vec2::new(
-            640.0,
-            1146.0
+            WINDOW_WIDTH,
+            WINDOW_HEIGHT,
             )),
             ..default()
         };
@@ -196,15 +202,17 @@ mod game {
         commands.spawn((
             Name::new("Startup background"),
             background,
-            Transform::from_translation(Vec3::new(1.0, 1.0, 0.0)),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
             StateScoped(GameState::Menu),
         ));
+
+        let ui_padding = 20.0;
 
         let start_screen_instructions = Sprite {
             image: sprites.start_screen_instructions.clone(),
             custom_size: Some(Vec2::new(
-                640.0,
-                1146.0
+                WINDOW_WIDTH - ui_padding * 5.0,
+                WINDOW_HEIGHT - ui_padding * 5.0,
             )),
             ..default()
         };
@@ -212,6 +220,7 @@ mod game {
         commands.spawn((
             Name::new("Start game UI"),
             start_screen_instructions,
+            Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
             StateScoped(GameState::Menu),
         ));
     }
@@ -307,11 +316,19 @@ mod game {
     }
 
     fn player_scored(
+        mut commands: Commands,
         mut passed_obstacle: EventReader<crate::obstacles::PlayerPassedObstacle>,
         mut score: ResMut<Score>,
+        audio: Res<AudioAssets>
     ) {
         for _ in passed_obstacle.read() {
             score.passed_obstactle();
+
+            commands.spawn((
+                Name::new("Point scored audio"),
+                PlaybackSettings::DESPAWN.with_volume(Volume::new(0.1)),
+                AudioPlayer::new(audio.point.clone())
+            ));
         }
     }
 
@@ -326,7 +343,6 @@ mod game {
                 continue;
             };
 
-            info!("Spawning new sound");
             commands.spawn((
                 Name::new("Hit effect"),
                 AudioPlayer(audio_asssets.hit.clone()),
