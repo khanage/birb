@@ -69,7 +69,11 @@ jobs:
             ./target/wasm32-unknown-unknown/release/birb.wasm
 
           cp index.html khanage.github.io/games/birb.html
-          cp -r assets/sprites khanage.github.io/games/assets/
+          
+          mkdir -p khanage.github.io/games/assets/sprites khanage.github.io/games/assets/audio/
+          
+          cp -r assets/sprites/* khanage.github.io/games/assets/sprites/
+          cp -r assets/audio/* khanage.github.io/games/assets/audio/
 
       - name: Publish
         run: |
