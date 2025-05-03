@@ -74,6 +74,8 @@ jobs:
           
           cp -r assets/sprites/* khanage.github.io/games/assets/sprites/
           cp -r assets/audio/* khanage.github.io/games/assets/audio/
+          
+          find khanage.github.io/games
 
       - name: Publish
         run: |
