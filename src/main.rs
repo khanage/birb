@@ -178,6 +178,7 @@ mod game {
         commands.spawn((
             Name::new("Game over ui"),
             Sprite::from_image(asset_server.game_over.clone()),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 4.0)),
             StateScoped(AppState::InGame)
         ));
     }
