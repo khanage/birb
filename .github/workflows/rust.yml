@@ -74,12 +74,11 @@ jobs:
           
           cp -r assets/sprites/* khanage.github.io/games/assets/sprites/
           cp -r assets/audio/* khanage.github.io/games/assets/audio/
-          
-          find khanage.github.io/games
 
       - name: Publish
         run: |
           pushd khanage.github.io/games
+          git add .
 
           if [[ $(git diff --exit-code HEAD) ]]; then
             COMMIT_MSG="${1:-Pushing changes}"
