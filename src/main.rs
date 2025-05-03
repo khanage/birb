@@ -14,14 +14,15 @@ fn main() {
         .add_plugins(bird::BirdPlugin)
         .add_plugins(input::InputPlugin)
         .add_plugins(obstacles::ObstaclePlugin)
+        .init_state::<AppState>()
         .init_state::<GameState>()
         .add_loading_state(
-            LoadingState::new(GameState::Loading)
-                .continue_to_state(GameState::Menu)
+            LoadingState::new(AppState::Loading)
+                .continue_to_state(AppState::Menu)
                 .load_collection::<AudioAssets>()
                 .load_collection::<SpriteAssets>(),
         )
-        .enable_state_scoped_entities::<GameState>()
+        .enable_state_scoped_entities::<AppState>()
         .add_systems(Update, escape_to_quit);
 
     #[cfg(feature = "debug")]
@@ -44,6 +45,8 @@ struct SpriteAssets {
     start_screen_instructions: Handle<Image>,
     #[asset(path = "sprites/background-night.png")]
     start_screen_background: Handle<Image>,
+    #[asset(path = "sprites/gameover.png")]
+    game_over: Handle<Image>,
 }
 
 #[derive(AssetCollection, Resource)]
@@ -52,8 +55,6 @@ struct AudioAssets {
     hit: Handle<AudioSource>,
     #[asset(path = "audio/point.ogg")]
     point: Handle<AudioSource>,
-    #[asset(path = "audio/die.ogg")]
-    die: Handle<AudioSource>,
 }
 
 fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<AppExit>) {
@@ -63,11 +64,18 @@ fn escape_to_quit(keys: Res<ButtonInput<KeyCode>>, mut app_exit: EventWriter<App
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
-pub enum GameState {
+pub enum AppState {
     #[default]
     Loading,
     Menu,
     InGame,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, States)]
+pub enum GameState {
+    #[default]
+    Running,
+    GameOver,
 }
 
 mod consts {
@@ -144,25 +152,45 @@ mod game {
                 .add_plugins(default_plugins)
                 .init_resource::<Score>()
                 .add_systems(Startup, setup_camera)
-                .add_systems(OnEnter(GameState::Loading), spawn_loading_screen)
-                .add_systems(OnExit(GameState::Loading), despawn_loading_screen)
-                .add_systems(OnEnter(GameState::Menu), spawn_start_menu)
+                .add_systems(OnEnter(AppState::Loading), spawn_loading_screen)
+                .add_systems(OnExit(AppState::Loading), despawn_loading_screen)
+                .add_systems(OnEnter(AppState::Menu), spawn_start_menu)
                 .add_systems(
                     Update,
-                    start_game_on_input.run_if(in_state(GameState::Menu)),
+                    start_game_on_input.run_if(in_state(AppState::Menu)),
                 )
                 .add_systems(
-                    OnEnter(GameState::InGame),
+                    OnEnter(AppState::InGame),
                     (spawn_ground_and_ceiling, spawn_ui),
                 )
                 .add_systems(
                     Update,
                     (detect_collisions, update_score, player_scored)
-                        .run_if(in_state(GameState::InGame)),
-                );
+                        .run_if(in_state(AppState::InGame))
+                        .run_if(in_state(GameState::Running)),
+                )
+                .add_systems(OnEnter(GameState::GameOver), spawn_game_over_ui)
+                .add_systems(Update, finish_game.run_if(in_state(AppState::InGame)).run_if(in_state(GameState::GameOver)));
         }
     }
-
+    
+    fn spawn_game_over_ui(mut commands: Commands, asset_server: Res<SpriteAssets>) {
+        commands.spawn((
+            Name::new("Game over ui"),
+            Sprite::from_image(asset_server.game_over.clone()),
+            StateScoped(AppState::InGame)
+        ));
+    }
+    
+    fn finish_game(
+        mut input: EventReader<input::ButtonPressed>,
+        mut next_state: ResMut<NextState<AppState>>,
+    ) {
+        if input.is_empty() { return; }
+        input.clear();
+        
+        next_state.set(AppState::Menu);
+    }
     fn setup_camera(mut commands: Commands) {
         commands.spawn(Camera2d);
     }
@@ -203,7 +231,7 @@ mod game {
             Name::new("Startup background"),
             background,
             Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
-            StateScoped(GameState::Menu),
+            StateScoped(AppState::Menu),
         ));
 
         let ui_padding = 20.0;
@@ -221,16 +249,16 @@ mod game {
             Name::new("Start game UI"),
             start_screen_instructions,
             Transform::from_translation(Vec3::new(0.0, 0.0, 1.0)),
-            StateScoped(GameState::Menu),
+            StateScoped(AppState::Menu),
         ));
     }
 
     fn start_game_on_input(
         mut input: EventReader<input::ButtonPressed>,
-        mut next_state: ResMut<NextState<GameState>>,
+        mut next_state: ResMut<NextState<AppState>>,
     ) {
         for _ in input.read() {
-            next_state.set(GameState::InGame);
+            next_state.set(AppState::InGame);
         }
 
         input.clear();
@@ -250,14 +278,14 @@ mod game {
             Name::new("Background image"),
             background,
             Transform::from_xyz(0.0, 0.0, -2.0).with_scale(Vec3::new(2.25, 2.25, 1.0)),
-            StateScoped(GameState::InGame),
+            StateScoped(AppState::InGame),
         ));
 
         commands.spawn((
             Name::new("Ground texture"),
             bottom,
             Transform::from_xyz(0.0, -500.0, -1.0).with_scale(Vec3::new(2.25, 2.25, 1.0)),
-            StateScoped(GameState::InGame),
+            StateScoped(AppState::InGame),
         ));
 
         commands.spawn((
@@ -265,7 +293,7 @@ mod game {
             Collider::cuboid(width, 10.0),
             Transform::from_xyz(-width / 2.0, height / 2.0, 0.0),
             RigidBody::Fixed,
-            StateScoped(GameState::InGame),
+            StateScoped(AppState::InGame),
         ));
 
         commands.spawn((
@@ -273,7 +301,7 @@ mod game {
             Collider::cuboid(width, 10.0),
             Transform::from_xyz(-width / 2.0, -height / 2.0, 0.0),
             RigidBody::Fixed,
-            StateScoped(GameState::InGame),
+            StateScoped(AppState::InGame),
         ));
     }
 
@@ -303,7 +331,7 @@ mod game {
                 right: Val::Px(15.0),
                 ..default()
             },
-            StateScoped(GameState::InGame),
+            StateScoped(AppState::InGame),
         ));
     }
 
@@ -336,7 +364,7 @@ mod game {
         mut commands: Commands,
         mut collision_events: EventReader<CollisionEvent>,
         mut next_state: ResMut<NextState<GameState>>,
-        audio_asssets: Res<AudioAssets>,
+        audio_assets: Res<AudioAssets>,
     ) {
         for collision in collision_events.read() {
             let CollisionEvent::Started(_, _, _) = collision else {
@@ -345,11 +373,11 @@ mod game {
 
             commands.spawn((
                 Name::new("Hit effect"),
-                AudioPlayer(audio_asssets.hit.clone()),
+                AudioPlayer(audio_assets.hit.clone()),
                 PlaybackSettings::DESPAWN.with_volume(Volume::new(0.25)),
             ));
 
-            next_state.set(GameState::Menu);
+            next_state.set(GameState::GameOver);
         }
     }
 }
@@ -363,11 +391,25 @@ mod physics {
     impl Plugin for PhysicsPlugin {
         fn build(&self, application: &mut App) {
             application
-                .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0));
+                .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
+                .add_systems(OnEnter(GameState::Running), start_physics)
+                .add_systems(OnEnter(GameState::GameOver), stop_physics);
 
             #[cfg(feature = "debug")]
             application
                 .add_plugins(RapierDebugRenderPlugin::default());
+        }
+    }
+
+    fn start_physics(mut physics_config: Query<&mut RapierConfiguration>) {
+        for mut config in physics_config.iter_mut() {
+            config.physics_pipeline_active = true;
+        }
+    }
+
+    fn stop_physics(mut physics_config: Query<&mut RapierConfiguration>) {
+        for mut config in physics_config.iter_mut() {
+            config.physics_pipeline_active = false;
         }
     }
 }
@@ -381,8 +423,8 @@ mod bird {
     impl Plugin for BirdPlugin {
         fn build(&self, application: &mut App) {
             application
-                .add_systems(OnEnter(GameState::InGame), spawn_bird)
-                .add_systems(Update, (flap_bird, animate_bird).run_if(in_state(GameState::InGame)));
+                .add_systems(OnEnter(AppState::InGame), spawn_bird)
+                .add_systems(Update, (flap_bird, animate_bird).run_if(in_state(AppState::InGame)));
         }
     }
 
@@ -420,7 +462,7 @@ mod bird {
             GravityScale(1.4),
             Velocity::default(),
             LockedAxes::ROTATION_LOCKED,
-            StateScoped(GameState::InGame),
+            StateScoped(AppState::InGame),
         ));
     }
 
@@ -468,7 +510,7 @@ mod obstacles {
                 .insert_resource(ObstacleSpawnTimer {
                     timer: Timer::from_seconds(TIME_BETWEEN_SPAWN, TimerMode::Repeating),
                 })
-                .add_systems(OnEnter(GameState::InGame), (spawn_obstacle, reset_timer))
+                .add_systems(OnEnter(AppState::InGame), (spawn_obstacle, reset_timer, reset_game_state))
                 .add_systems(
                     Update,
                     (
@@ -476,7 +518,8 @@ mod obstacles {
                         score_obstacle,
                         spawn_obstacle_timed,
                     )
-                        .run_if(in_state(GameState::InGame)),
+                        .run_if(in_state(AppState::InGame))
+                        .run_if(in_state(GameState::Running)),
                 );
         }
     }
@@ -488,6 +531,12 @@ mod obstacles {
 
     fn reset_timer(mut timer: ResMut<ObstacleSpawnTimer>) {
         timer.timer.reset();
+    }
+
+    fn reset_game_state(
+        mut next_state: ResMut<NextState<GameState>>,
+    ) {
+        next_state.set(GameState::Running);
     }
 
     #[derive(Default, Component)]
@@ -566,7 +615,7 @@ mod obstacles {
                     ..default()
                 },
                 Visibility::Visible,
-                StateScoped(GameState::InGame),
+                StateScoped(AppState::InGame),
             ))
             .with_children(|parent| {
                 let mut flipped_sprite = Sprite::from_image(assets.green_pipe.clone());
