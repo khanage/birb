@@ -137,8 +137,12 @@ mod game {
                         name: Some("blappy_birb.app".into()),
                         window_theme: Some(WindowTheme::Dark),
                         // This breaks on WSL for some reason
-                        // #[cfg(not(target_os = "linux"))]
-                        resolution: bevy::window::WindowResolution::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+                        #[cfg(target_arch = "wasm32")]
+                        canvas: Some("#birb_canvas".into()),
+                        resolution: bevy::window::WindowResolution::new(
+                            WINDOW_WIDTH,
+                            WINDOW_HEIGHT,
+                        ),
                         ..default()
                     }),
                     ..default()
@@ -155,10 +159,7 @@ mod game {
                 .add_systems(OnEnter(AppState::Loading), spawn_loading_screen)
                 .add_systems(OnExit(AppState::Loading), despawn_loading_screen)
                 .add_systems(OnEnter(AppState::Menu), spawn_start_menu)
-                .add_systems(
-                    Update,
-                    start_game_on_input.run_if(in_state(AppState::Menu)),
-                )
+                .add_systems(Update, start_game_on_input.run_if(in_state(AppState::Menu)))
                 .add_systems(
                     OnEnter(AppState::InGame),
                     (spawn_ground_and_ceiling, spawn_ui),
@@ -170,26 +171,33 @@ mod game {
                         .run_if(in_state(GameState::Running)),
                 )
                 .add_systems(OnEnter(GameState::GameOver), spawn_game_over_ui)
-                .add_systems(Update, finish_game.run_if(in_state(AppState::InGame)).run_if(in_state(GameState::GameOver)));
+                .add_systems(
+                    Update,
+                    finish_game
+                        .run_if(in_state(AppState::InGame))
+                        .run_if(in_state(GameState::GameOver)),
+                );
         }
     }
-    
+
     fn spawn_game_over_ui(mut commands: Commands, asset_server: Res<SpriteAssets>) {
         commands.spawn((
             Name::new("Game over ui"),
             Sprite::from_image(asset_server.game_over.clone()),
             Transform::from_translation(Vec3::new(0.0, 0.0, 4.0)),
-            StateScoped(AppState::InGame)
+            StateScoped(AppState::InGame),
         ));
     }
-    
+
     fn finish_game(
         mut input: EventReader<input::ButtonPressed>,
         mut next_state: ResMut<NextState<AppState>>,
     ) {
-        if input.is_empty() { return; }
+        if input.is_empty() {
+            return;
+        }
         input.clear();
-        
+
         next_state.set(AppState::Menu);
     }
     fn setup_camera(mut commands: Commands) {
@@ -221,10 +229,7 @@ mod game {
     fn spawn_start_menu(mut commands: Commands, sprites: Res<SpriteAssets>) {
         let background = Sprite {
             image: sprites.start_screen_background.clone(),
-            custom_size: Some(Vec2::new(
-            WINDOW_WIDTH,
-            WINDOW_HEIGHT,
-            )),
+            custom_size: Some(Vec2::new(WINDOW_WIDTH, WINDOW_HEIGHT)),
             ..default()
         };
 
@@ -315,6 +320,10 @@ mod game {
         pub fn passed_obstactle(&mut self) {
             self.score += 100;
         }
+
+        pub fn reset(&mut self) {
+            self.score = 0;
+        }
     }
 
     #[derive(Default, Component)]
@@ -348,7 +357,7 @@ mod game {
         mut commands: Commands,
         mut passed_obstacle: EventReader<crate::obstacles::PlayerPassedObstacle>,
         mut score: ResMut<Score>,
-        audio: Res<AudioAssets>
+        audio: Res<AudioAssets>,
     ) {
         for _ in passed_obstacle.read() {
             score.passed_obstactle();
@@ -356,7 +365,7 @@ mod game {
             commands.spawn((
                 Name::new("Point scored audio"),
                 PlaybackSettings::DESPAWN.with_volume(Volume::new(0.1)),
-                AudioPlayer::new(audio.point.clone())
+                AudioPlayer::new(audio.point.clone()),
             ));
         }
     }
@@ -397,8 +406,7 @@ mod physics {
                 .add_systems(OnEnter(GameState::GameOver), stop_physics);
 
             #[cfg(feature = "debug")]
-            application
-                .add_plugins(RapierDebugRenderPlugin::default());
+            application.add_plugins(RapierDebugRenderPlugin::default());
         }
     }
 
@@ -425,7 +433,10 @@ mod bird {
         fn build(&self, application: &mut App) {
             application
                 .add_systems(OnEnter(AppState::InGame), spawn_bird)
-                .add_systems(Update, (flap_bird, animate_bird).run_if(in_state(AppState::InGame)));
+                .add_systems(
+                    Update,
+                    (flap_bird, animate_bird).run_if(in_state(AppState::InGame)),
+                );
         }
     }
 
@@ -441,14 +452,24 @@ mod bird {
     #[derive(Component, Deref, DerefMut)]
     struct AnimationTimer(Timer);
 
-    fn spawn_bird(mut commands: Commands, assets: Res<SpriteAssets>, mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>) {
+    fn spawn_bird(
+        mut commands: Commands,
+        assets: Res<SpriteAssets>,
+        mut texture_atlas_layouts: ResMut<Assets<TextureAtlasLayout>>,
+    ) {
         let spawn_y = 128.0;
 
         let birb_texture = assets.birb.clone();
         let layout = TextureAtlasLayout::from_grid(UVec2::new(34, 24), 4, 1, None, None);
         let layout = texture_atlas_layouts.add(layout);
         let animation_indices = AnimationIndices { first: 0, last: 3 };
-        let sprite = Sprite::from_atlas_image(birb_texture, TextureAtlas { layout, index: animation_indices.first });
+        let sprite = Sprite::from_atlas_image(
+            birb_texture,
+            TextureAtlas {
+                layout,
+                index: animation_indices.first,
+            },
+        );
 
         commands.spawn((
             Name::new("Birb"),
@@ -467,8 +488,11 @@ mod bird {
         ));
     }
 
-    fn animate_bird(time: Res<Time>, mut query: Query<(&AnimationIndices, &mut AnimationTimer,  &mut Sprite)>){
-        for (animation_indices, mut animation_timer, mut sprite) in query.iter_mut(){
+    fn animate_bird(
+        time: Res<Time>,
+        mut query: Query<(&AnimationIndices, &mut AnimationTimer, &mut Sprite)>,
+    ) {
+        for (animation_indices, mut animation_timer, mut sprite) in query.iter_mut() {
             animation_timer.tick(time.delta());
 
             if animation_timer.just_finished() {
@@ -497,7 +521,7 @@ mod bird {
 }
 
 mod obstacles {
-    use crate::*;
+    use crate::{game::Score, *};
     use bevy::window::PrimaryWindow;
     use bevy_rapier2d::prelude::*;
     use rand::Rng;
@@ -511,7 +535,10 @@ mod obstacles {
                 .insert_resource(ObstacleSpawnTimer {
                     timer: Timer::from_seconds(TIME_BETWEEN_SPAWN, TimerMode::Repeating),
                 })
-                .add_systems(OnEnter(AppState::InGame), (spawn_obstacle, reset_timer, reset_game_state))
+                .add_systems(
+                    OnEnter(AppState::InGame),
+                    (spawn_obstacle, reset_timer, reset_game_state),
+                )
                 .add_systems(
                     Update,
                     (
@@ -534,10 +561,9 @@ mod obstacles {
         timer.timer.reset();
     }
 
-    fn reset_game_state(
-        mut next_state: ResMut<NextState<GameState>>,
-    ) {
+    fn reset_game_state(mut next_state: ResMut<NextState<GameState>>, mut score: ResMut<Score>) {
         next_state.set(GameState::Running);
+        score.reset();
     }
 
     #[derive(Default, Component)]

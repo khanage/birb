@@ -1,11 +1,27 @@
 <!doctype html>
 <html lang="en">
-
 <head>
-    <title>Birb!</title>
-</head>
+  <title>Birb: a flappy bird clone</title>
+    <style>
+    body {
+      margin: 0px;
+      color: white;
+      background-color: black;
+    }
 
-<body style="margin: 0px;">
+    #canvas-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    </style>
+</head>
+<body style="margin: 0px; background-color: #000000;">
+  <h1>Birb!</h1>
+    <div id="canvas-container">
+      <canvas id="birb_canvas"></canvas>
+    </div>
+  
   <script type="module">
     import init from './birb.js'
 
