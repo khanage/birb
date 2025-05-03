@@ -1,7 +1,10 @@
-.PHONY: wasm
-.SILENT: wasm
+.PHONY: wasm win
+.SILENT: wasm win
 
 wasm:
+	rm -rf ./web/
+	mkdir web
+
 	cargo build --release --target wasm32-unknown-unknown
 
 	wasm-bindgen --no-typescript --target web \
@@ -13,3 +16,8 @@ wasm:
 	cp -r assets ./web/
 
 	http-server ./web/
+
+win: 
+	cargo build --target x86_64-pc-windows-gnu
+	cp -r assets target/x86_64-pc-windows-gnu/debug/
+	cargo run --target x86_64-pc-windows-gnu
