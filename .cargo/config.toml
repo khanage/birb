@@ -5,9 +5,6 @@ RUST_BACKTRACE = "1"
 linker = "clang"
 rustflags = ["-C", "link-arg=-fuse-ld=lld"]
 
-[target.x86_64-unknown-linux-gnu.env]
-PKG_CONFIG_PATH = { value = "/homebrew/alsa-lib/1.2.14/lib/pkgconfig:/homebrew/libxkbcommon/1.9.0/lib/pkgconfig", force = true }
-
 [target.wasm32-unknown-unknown]
 runner = "wasm-server-runner"
 
